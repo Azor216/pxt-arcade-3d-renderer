@@ -93,6 +93,10 @@ namespace Render3D {
     //% group="Scene" weight=90
     export function render(): void {
         const sc = ensureScene()
+
+        // Push camera out if a moving mesh pushed into it
+        _pushOut(sc)
+
         const img = scene.backgroundImage()
         img.fill(0)
 
@@ -341,21 +345,9 @@ namespace Render3D {
     export function moveCameraForward(amount: number): void {
         const sc = ensureScene()
         const cam = sc.camera
-        const nx = cam.position.x + Math.sin(cam.yaw) * amount
-        const nz = cam.position.z + Math.cos(cam.yaw) * amount
-        if (!_checkCollisionXZ(sc, nx, cam.position.y, nz)) {
-            cam.position.x = nx
-            cam.position.z = nz
-        } else {
-            // Slide along axes
-            if (!_checkCollisionXZ(sc, nx, cam.position.y, cam.position.z)) {
-                cam.position.x = nx
-            }
-            if (!_checkCollisionXZ(sc, cam.position.x, cam.position.y, nz)) {
-                cam.position.z = nz
-            }
-        }
-        _pushOut(sc)
+        const dirX = Math.sin(cam.yaw)
+        const dirZ = Math.cos(cam.yaw)
+        _moveCamera(sc, dirX * amount, dirZ * amount)
     }
 
     //% blockId=r3d_cam_right block="move camera right by $amount"
@@ -364,19 +356,40 @@ namespace Render3D {
     export function moveCameraRight(amount: number): void {
         const sc = ensureScene()
         const cam = sc.camera
-        const nx = cam.position.x + Math.cos(cam.yaw) * amount
-        const nz = cam.position.z + (-Math.sin(cam.yaw)) * amount
-        if (!_checkCollisionXZ(sc, nx, cam.position.y, nz)) {
-            cam.position.x = nx
-            cam.position.z = nz
-        } else {
-            if (!_checkCollisionXZ(sc, nx, cam.position.y, cam.position.z)) {
+        const dirX = Math.cos(cam.yaw)
+        const dirZ = -Math.sin(cam.yaw)
+        _moveCamera(sc, dirX * amount, dirZ * amount)
+    }
+
+    // Core movement with sub-stepping and wall sliding
+    function _moveCamera(sc: Scene3D, mx: number, mz: number): void {
+        const cam = sc.camera
+        const SUBSTEPS = 4
+        const sx = mx / SUBSTEPS
+        const sz = mz / SUBSTEPS
+
+        for (let s = 0; s < SUBSTEPS; s++) {
+            const nx = cam.position.x + sx
+            const nz = cam.position.z + sz
+
+            if (!_checkCollisionXZ(sc, nx, cam.position.y, nz)) {
+                // No collision, move freely
                 cam.position.x = nx
-            }
-            if (!_checkCollisionXZ(sc, cam.position.x, cam.position.y, nz)) {
                 cam.position.z = nz
+            } else {
+                // Try slide X only
+                if (!_checkCollisionXZ(sc, nx, cam.position.y, cam.position.z)) {
+                    cam.position.x = nx
+                }
+                // Try slide Z only (from current x, NOT nx)
+                if (!_checkCollisionXZ(sc, cam.position.x, cam.position.y, nz)) {
+                    cam.position.z = nz
+                }
+                // Hit a wall, stop sub-stepping
+                break
             }
         }
+        // Safety push-out
         _pushOut(sc)
     }
 
@@ -704,36 +717,41 @@ namespace Render3D {
         return false
     }
 
-    // Push camera out of any colliding object
+    // Push camera out of any colliding object (iterate for safety)
     function _pushOut(sc: Scene3D): void {
         const cam = sc.camera
-        const camBottom = cam.position.y - CAM_HEIGHT
-        for (let i = 0; i < sc.meshes.length; i++) {
-            const m = sc.meshes[i]
-            if (!m._collider) continue
-            const hw = m._bboxW * m._scale / 2 + CAM_RADIUS
-            const hh = m._bboxH * m._scale / 2
-            const hd = m._bboxD * m._scale / 2 + CAM_RADIUS
-            const dx = cam.position.x - m.position.x
-            const dz = cam.position.z - m.position.z
-            const boxTop = m.position.y + hh
-            const boxBottom = m.position.y - hh
-            if (dx > -hw && dx < hw && dz > -hd && dz < hd &&
-                camBottom < boxTop && cam.position.y > boxBottom) {
-                // Camera is inside this collider – push out on shortest axis
-                const pushXp = hw - dx    // push in +X
-                const pushXn = hw + dx    // push in -X
-                const pushZp = hd - dz    // push in +Z
-                const pushZn = hd + dz    // push in -Z
-                const minPush = Math.min(
-                    Math.min(pushXp, pushXn),
-                    Math.min(pushZp, pushZn)
-                )
-                if (minPush === pushXp) cam.position.x = m.position.x + hw
-                else if (minPush === pushXn) cam.position.x = m.position.x - hw
-                else if (minPush === pushZp) cam.position.z = m.position.z + hd
-                else cam.position.z = m.position.z - hd
+        for (let iter = 0; iter < 3; iter++) {
+            let pushed = false
+            const camBottom = cam.position.y - CAM_HEIGHT
+            for (let i = 0; i < sc.meshes.length; i++) {
+                const m = sc.meshes[i]
+                if (!m._collider) continue
+                const hw = m._bboxW * m._scale / 2 + CAM_RADIUS
+                const hh = m._bboxH * m._scale / 2
+                const hd = m._bboxD * m._scale / 2 + CAM_RADIUS
+                const dx = cam.position.x - m.position.x
+                const dz = cam.position.z - m.position.z
+                const boxTop = m.position.y + hh
+                const boxBottom = m.position.y - hh
+                if (dx > -hw && dx < hw && dz > -hd && dz < hd &&
+                    camBottom < boxTop && cam.position.y > boxBottom) {
+                    // Camera is inside – push out on shortest XZ axis
+                    const pushXp = hw - dx
+                    const pushXn = hw + dx
+                    const pushZp = hd - dz
+                    const pushZn = hd + dz
+                    const minPush = Math.min(
+                        Math.min(pushXp, pushXn),
+                        Math.min(pushZp, pushZn)
+                    )
+                    if (minPush === pushXp) cam.position.x = m.position.x + hw + 0.01
+                    else if (minPush === pushXn) cam.position.x = m.position.x - hw - 0.01
+                    else if (minPush === pushZp) cam.position.z = m.position.z + hd + 0.01
+                    else cam.position.z = m.position.z - hd - 0.01
+                    pushed = true
+                }
             }
+            if (!pushed) break
         }
     }
 
