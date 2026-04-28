@@ -8,7 +8,7 @@
     "files": [
         "math3d.ts",
         "render3d.ts",
-        "main.ts"
+        "engine.ts"
     ],
     "testFiles": [
         "test.ts"
