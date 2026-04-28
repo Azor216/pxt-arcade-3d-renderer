@@ -88,8 +88,7 @@ namespace Rasterizer {
     export function shadePixel(col: number, shade: number): number {
         if (col <= 0 || col > 15) return col
         if (shade === 0) return col
-        if (shade === 1) return DARK[col]
-        return DARK[DARK[col]]
+        return DARK[col]  // max 1 level of darkening for textures
     }
 
     // ---- Texture storage ----
@@ -173,6 +172,7 @@ namespace Rasterizer {
     }
 
     // Textured triangle rasterizer with perspective-correct UV
+    // (no nested functions - MakeCode STS compatible)
     export function fillTriangleTex(
         img: Image, tex: Image, shade: number,
         x0: number, y0: number, uz0: number, vz0: number, iz0: number,
@@ -208,12 +208,22 @@ namespace Rasterizer {
         if (dy20 === 0) return
         const dy10 = y1 - y0
         const dy21 = y2 - y1
-        const idy20 = 1 / dy20
+        const idy20 = 1.0 / dy20
 
-        // Scanline helper
-        function scanline(y: number, xa: number, xb: number,
-            uza: number, vza: number, iza: number,
-            uzb: number, vzb: number, izb: number): void {
+        // Upper half (y0 to y1)
+        const yS0 = Math.max(0, y0)
+        const yE0 = Math.min(119, y1)
+        for (let y = yS0; y <= yE0; y++) {
+            const a = (y - y0) * idy20
+            const b = dy10 > 0 ? (y - y0) / dy10 : 1
+            let xa = x0 + (x2 - x0) * a
+            let xb = x0 + (x1 - x0) * b
+            let uza = uz0 + (uz2 - uz0) * a
+            let vza = vz0 + (vz2 - vz0) * a
+            let iza = iz0 + (iz2 - iz0) * a
+            let uzb = uz0 + (uz1 - uz0) * b
+            let vzb = vz0 + (vz1 - vz0) * b
+            let izb = iz0 + (iz1 - iz0) * b
             if (xa > xb) {
                 tmp = xa; xa = xb; xb = tmp
                 tmp = uza; uza = uzb; uzb = tmp
@@ -222,39 +232,26 @@ namespace Rasterizer {
             }
             const ixa = Math.max(0, Math.ceil(xa))
             const ixb = Math.min(159, Math.floor(xb))
-            if (ixa > ixb) return
-            const span = xb - xa
-            const ispan = span > 0 ? 1 / span : 0
-            for (let x = ixa; x <= ixb; x++) {
-                const t = (x - xa) * ispan
-                const iz = iza + (izb - iza) * t
-                if (iz < 0.0001) continue
-                const rz = 1 / iz
-                const u = (uza + (uzb - uza) * t) * rz
-                const v = (vza + (vzb - vza) * t) * rz
-                // Wrap UV to [0, tw) / [0, th)
-                let tx = Math.floor(u * tw) % tw
-                let ty = Math.floor(v * th) % th
-                if (tx < 0) tx += tw
-                if (ty < 0) ty += th
-                let c = tex.getPixel(tx, ty)
-                if (c === 0) continue  // transparent
-                c = shadePixel(c, shade)
-                img.setPixel(x, y, c)
+            if (ixa <= ixb) {
+                const span = xb - xa
+                const ispan = span > 0 ? 1.0 / span : 0
+                for (let x = ixa; x <= ixb; x++) {
+                    const t = (x - xa) * ispan
+                    const iz = iza + (izb - iza) * t
+                    if (iz < 0.0001) continue
+                    const rz = 1.0 / iz
+                    const u = (uza + (uzb - uza) * t) * rz
+                    const v = (vza + (vzb - vza) * t) * rz
+                    let tx = Math.floor(u * tw) % tw
+                    let ty = Math.floor(v * th) % th
+                    if (tx < 0) tx += tw
+                    if (ty < 0) ty += th
+                    let c = tex.getPixel(tx, ty)
+                    if (c === 0) continue
+                    c = shadePixel(c, shade)
+                    img.setPixel(x, y, c)
+                }
             }
-        }
-
-        // Upper half (y0 to y1)
-        const yS0 = Math.max(0, y0)
-        const yE0 = Math.min(119, y1)
-        for (let y = yS0; y <= yE0; y++) {
-            const a = (y - y0) * idy20
-            const b = dy10 > 0 ? (y - y0) / dy10 : 1
-            const xa = x0 + (x2 - x0) * a
-            const xb = x0 + (x1 - x0) * b
-            scanline(y, xa, xb,
-                uz0 + (uz2 - uz0) * a, vz0 + (vz2 - vz0) * a, iz0 + (iz2 - iz0) * a,
-                uz0 + (uz1 - uz0) * b, vz0 + (vz1 - vz0) * b, iz0 + (iz1 - iz0) * b)
         }
 
         // Lower half (y1+1 to y2)
@@ -263,11 +260,42 @@ namespace Rasterizer {
         for (let y = yS1; y <= yE1; y++) {
             const a = (y - y0) * idy20
             const b = dy21 > 0 ? (y - y1) / dy21 : 1
-            const xa = x0 + (x2 - x0) * a
-            const xb = x1 + (x2 - x1) * b
-            scanline(y, xa, xb,
-                uz0 + (uz2 - uz0) * a, vz0 + (vz2 - vz0) * a, iz0 + (iz2 - iz0) * a,
-                uz1 + (uz2 - uz1) * b, vz1 + (vz2 - vz1) * b, iz1 + (iz2 - iz1) * b)
+            let xa = x0 + (x2 - x0) * a
+            let xb = x1 + (x2 - x1) * b
+            let uza = uz0 + (uz2 - uz0) * a
+            let vza = vz0 + (vz2 - vz0) * a
+            let iza = iz0 + (iz2 - iz0) * a
+            let uzb = uz1 + (uz2 - uz1) * b
+            let vzb = vz1 + (vz2 - vz1) * b
+            let izb = iz1 + (iz2 - iz1) * b
+            if (xa > xb) {
+                tmp = xa; xa = xb; xb = tmp
+                tmp = uza; uza = uzb; uzb = tmp
+                tmp = vza; vza = vzb; vzb = tmp
+                tmp = iza; iza = izb; izb = tmp
+            }
+            const ixa = Math.max(0, Math.ceil(xa))
+            const ixb = Math.min(159, Math.floor(xb))
+            if (ixa <= ixb) {
+                const span = xb - xa
+                const ispan = span > 0 ? 1.0 / span : 0
+                for (let x = ixa; x <= ixb; x++) {
+                    const t = (x - xa) * ispan
+                    const iz = iza + (izb - iza) * t
+                    if (iz < 0.0001) continue
+                    const rz = 1.0 / iz
+                    const u = (uza + (uzb - uza) * t) * rz
+                    const v = (vza + (vzb - vza) * t) * rz
+                    let tx = Math.floor(u * tw) % tw
+                    let ty = Math.floor(v * th) % th
+                    if (tx < 0) tx += tw
+                    if (ty < 0) ty += th
+                    let c = tex.getPixel(tx, ty)
+                    if (c === 0) continue
+                    c = shadePixel(c, shade)
+                    img.setPixel(x, y, c)
+                }
+            }
         }
     }
 }
