@@ -66,7 +66,7 @@ class Scene3D {
 // ============================================================
 
 //% color="#4b7bec" weight=100 icon="\uf1b2"
-//% groups="['Scene', 'Camera', 'Objects', 'Transform', 'Light']"
+//% groups="['Scene', 'Camera', 'Objects', 'Transform', 'Texture', 'Light']"
 namespace Render3D {
     const SW = 160
     const SH = 120
@@ -174,17 +174,21 @@ namespace Render3D {
                 if (mesh.rotation.z !== 0) normal = Math3D.rotateZ(normal, mesh.rotation.z)
                 const light = normal.dot(sc.lightDir)
                 const shadedColor = Rasterizer.shadeColor(face.color, light)
+                const shadeL = Rasterizer.shadeLevel(light)
 
-                // Collect clipped triangles (camera-space vertices)
+                // Collect clipped triangles (camera-space vertices + UVs)
                 const clipped: Vec3[] = []
+                const clippedUV: number[] = []  // u0,v0, u1,v1, u2,v2 per triangle
 
                 if (behind === 0) {
                     // No clipping needed
                     clipped.push(v0); clipped.push(v1); clipped.push(v2)
+                    clippedUV.push(face.u0, face.v0, face.u1, face.v1, face.u2, face.v2)
                 } else {
                     // Near-plane clip: put all 3 verts in array, in/out classification
                     const verts = [v0, v1, v2]
                     const inside: boolean[] = [!b0, !b1, !b2]
+                    const uvs = [face.u0, face.v0, face.u1, face.v1, face.u2, face.v2]
 
                     if (behind === 1) {
                         // 1 vertex behind → clip to 2 triangles (quad)
@@ -210,10 +214,17 @@ namespace Render3D {
                             vb.y + (vc.y - vb.y) * tc,
                             NEAR
                         )
+                        // Interpolate UVs
+                        const uva = [uvs[bi * 2] + (uvs[ai * 2] - uvs[bi * 2]) * ta,
+                                     uvs[bi * 2 + 1] + (uvs[ai * 2 + 1] - uvs[bi * 2 + 1]) * ta]
+                        const uvc = [uvs[bi * 2] + (uvs[ci * 2] - uvs[bi * 2]) * tc,
+                                     uvs[bi * 2 + 1] + (uvs[ci * 2 + 1] - uvs[bi * 2 + 1]) * tc]
                         // Triangle 1: va, na, vc
                         clipped.push(va); clipped.push(na); clipped.push(vc)
+                        clippedUV.push(uvs[ai * 2], uvs[ai * 2 + 1], uva[0], uva[1], uvs[ci * 2], uvs[ci * 2 + 1])
                         // Triangle 2: na, nc, vc
                         clipped.push(na); clipped.push(nc); clipped.push(vc)
+                        clippedUV.push(uva[0], uva[1], uvc[0], uvc[1], uvs[ci * 2], uvs[ci * 2 + 1])
                     } else {
                         // 2 vertices behind → clip to 1 triangle
                         let fi2 = 0
@@ -223,6 +234,8 @@ namespace Render3D {
                         const vf = verts[fi2]
                         const vl = verts[(fi2 + 1) % 3]
                         const vr = verts[(fi2 + 2) % 3]
+                        const li = (fi2 + 1) % 3
+                        const ri = (fi2 + 2) % 3
                         const tl = (NEAR - vf.z) / (vl.z - vf.z)
                         const tr = (NEAR - vf.z) / (vr.z - vf.z)
                         const nl = new Vec3(
@@ -235,7 +248,12 @@ namespace Render3D {
                             vf.y + (vr.y - vf.y) * tr,
                             NEAR
                         )
+                        const uvl0 = uvs[fi2 * 2] + (uvs[li * 2] - uvs[fi2 * 2]) * tl
+                        const uvl1 = uvs[fi2 * 2 + 1] + (uvs[li * 2 + 1] - uvs[fi2 * 2 + 1]) * tl
+                        const uvr0 = uvs[fi2 * 2] + (uvs[ri * 2] - uvs[fi2 * 2]) * tr
+                        const uvr1 = uvs[fi2 * 2 + 1] + (uvs[ri * 2 + 1] - uvs[fi2 * 2 + 1]) * tr
                         clipped.push(vf); clipped.push(nl); clipped.push(nr)
+                        clippedUV.push(uvs[fi2 * 2], uvs[fi2 * 2 + 1], uvl0, uvl1, uvr0, uvr1)
                     }
                 }
 
@@ -244,6 +262,7 @@ namespace Render3D {
                     const cv0 = clipped[ti]
                     const cv1 = clipped[ti + 1]
                     const cv2 = clipped[ti + 2]
+                    const uvi = ti * 2  // 6 UV values per triangle: u0,v0,u1,v1,u2,v2
 
                     const sx0 = cv0.x * focalLen / cv0.z + HW
                     const sy0 = -cv0.y * focalLen / cv0.z + HH
@@ -270,6 +289,21 @@ namespace Render3D {
                     rf.sx2 = sx2; rf.sy2 = sy2
                     rf.color = shadedColor
                     rf.depth = avgZ
+                    rf.texId = face.texId
+                    rf.shade = shadeL
+                    // Perspective-correct UV: store u/z, v/z, 1/z
+                    if (face.texId >= 0) {
+                        const rz0 = 1 / cv0.z, rz1 = 1 / cv1.z, rz2 = 1 / cv2.z
+                        rf.uz0 = clippedUV[uvi] * rz0
+                        rf.vz0 = clippedUV[uvi + 1] * rz0
+                        rf.iz0 = rz0
+                        rf.uz1 = clippedUV[uvi + 2] * rz1
+                        rf.vz1 = clippedUV[uvi + 3] * rz1
+                        rf.iz1 = rz1
+                        rf.uz2 = clippedUV[uvi + 4] * rz2
+                        rf.vz2 = clippedUV[uvi + 5] * rz2
+                        rf.iz2 = rz2
+                    }
                     renderList.push(rf)
                 }
             }
@@ -281,13 +315,23 @@ namespace Render3D {
         // Rasterize all visible faces
         for (let i = 0; i < renderList.length; i++) {
             const f = renderList[i]
-            Rasterizer.fillTriangle(
-                img,
-                f.sx0, f.sy0,
-                f.sx1, f.sy1,
-                f.sx2, f.sy2,
-                f.color
-            )
+            const tex = f.texId >= 0 ? Rasterizer.getTexture(f.texId) : null
+            if (tex) {
+                Rasterizer.fillTriangleTex(
+                    img, tex, f.shade,
+                    f.sx0, f.sy0, f.uz0, f.vz0, f.iz0,
+                    f.sx1, f.sy1, f.uz1, f.vz1, f.iz1,
+                    f.sx2, f.sy2, f.uz2, f.vz2, f.iz2
+                )
+            } else {
+                Rasterizer.fillTriangle(
+                    img,
+                    f.sx0, f.sy0,
+                    f.sx1, f.sy1,
+                    f.sx2, f.sy2,
+                    f.color
+                )
+            }
         }
     }
 
@@ -446,26 +490,20 @@ namespace Render3D {
         ]
 
         // 12 triangles, correct CCW winding for outward normals
-        mesh.faces = [
-            // Front face (+Z): normal (0,0,1)
-            new Tri3D(4, 5, 6, color),
-            new Tri3D(4, 6, 7, color),
-            // Back face (-Z): normal (0,0,-1)
-            new Tri3D(0, 3, 2, color),
-            new Tri3D(0, 2, 1, color),
-            // Right face (+X): normal (1,0,0)
-            new Tri3D(1, 2, 6, color),
-            new Tri3D(1, 6, 5, color),
-            // Left face (-X): normal (-1,0,0)
-            new Tri3D(0, 4, 7, color),
-            new Tri3D(0, 7, 3, color),
-            // Top face (+Y): normal (0,1,0)
-            new Tri3D(3, 7, 6, color),
-            new Tri3D(3, 6, 2, color),
-            // Bottom face (-Y): normal (0,-1,0)
-            new Tri3D(0, 1, 5, color),
-            new Tri3D(0, 5, 4, color),
-        ]
+        // Each quad has 2 triangles with UVs: (0,0)-(1,0)-(1,1) and (0,0)-(1,1)-(0,1)
+        const f0 = new Tri3D(4, 5, 6, color); f0.u0 = 0; f0.v0 = 1; f0.u1 = 1; f0.v1 = 1; f0.u2 = 1; f0.v2 = 0
+        const f1 = new Tri3D(4, 6, 7, color); f1.u0 = 0; f1.v0 = 1; f1.u1 = 1; f1.v1 = 0; f1.u2 = 0; f1.v2 = 0
+        const f2 = new Tri3D(0, 3, 2, color); f2.u0 = 1; f2.v0 = 1; f2.u1 = 1; f2.v1 = 0; f2.u2 = 0; f2.v2 = 0
+        const f3 = new Tri3D(0, 2, 1, color); f3.u0 = 1; f3.v0 = 1; f3.u1 = 0; f3.v1 = 0; f3.u2 = 0; f3.v2 = 1
+        const f4 = new Tri3D(1, 2, 6, color); f4.u0 = 0; f4.v0 = 1; f4.u1 = 0; f4.v1 = 0; f4.u2 = 1; f4.v2 = 0
+        const f5 = new Tri3D(1, 6, 5, color); f5.u0 = 0; f5.v0 = 1; f5.u1 = 1; f5.v1 = 0; f5.u2 = 1; f5.v2 = 1
+        const f6 = new Tri3D(0, 4, 7, color); f6.u0 = 1; f6.v0 = 1; f6.u1 = 0; f6.v1 = 1; f6.u2 = 0; f6.v2 = 0
+        const f7 = new Tri3D(0, 7, 3, color); f7.u0 = 1; f7.v0 = 1; f7.u1 = 0; f7.v1 = 0; f7.u2 = 1; f7.v2 = 0
+        const f8 = new Tri3D(3, 7, 6, color); f8.u0 = 0; f8.v0 = 0; f8.u1 = 0; f8.v1 = 1; f8.u2 = 1; f8.v2 = 1
+        const f9 = new Tri3D(3, 6, 2, color); f9.u0 = 0; f9.v0 = 0; f9.u1 = 1; f9.v1 = 1; f9.u2 = 1; f9.v2 = 0
+        const f10 = new Tri3D(0, 1, 5, color); f10.u0 = 0; f10.v0 = 0; f10.u1 = 1; f10.v1 = 0; f10.u2 = 1; f10.v2 = 1
+        const f11 = new Tri3D(0, 5, 4, color); f11.u0 = 0; f11.v0 = 0; f11.u1 = 1; f11.v1 = 1; f11.u2 = 0; f11.v2 = 1
+        mesh.faces = [f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11]
 
         mesh.position = new Vec3(x, y, z)
         mesh._collider = true
@@ -782,5 +820,173 @@ namespace Render3D {
     //% x.defl=0.5 y.defl=0.8 z.defl=-0.3
     export function setLightDirection(x: number, y: number, z: number): void {
         ensureScene().lightDir = new Vec3(x, y, z).normalize()
+    }
+
+    // ===================== TEXTURE =====================
+
+    //% blockId=r3d_create_tex block="create texture from image $img"
+    //% group="Texture" weight=100
+    //% img.shadow=screen_image_picker
+    export function createTexture(img: Image): number {
+        return Rasterizer.registerTexture(img)
+    }
+
+    //% blockId=r3d_set_mesh_tex block="set $mesh texture $texId"
+    //% group="Texture" weight=90
+    //% mesh.shadow=variables_get
+    export function setMeshTexture(mesh: Mesh3D, texId: number): void {
+        if (!mesh) return
+        for (let i = 0; i < mesh.faces.length; i++) {
+            mesh.faces[i].texId = texId
+        }
+    }
+
+    //% blockId=r3d_set_face_tex block="set $mesh face $faceIndex texture $texId"
+    //% group="Texture" weight=85
+    //% mesh.shadow=variables_get
+    export function setFaceTexture(mesh: Mesh3D, faceIndex: number, texId: number): void {
+        if (!mesh || faceIndex < 0 || faceIndex >= mesh.faces.length) return
+        mesh.faces[faceIndex].texId = texId
+    }
+
+    //% blockId=r3d_set_face_uv block="set $mesh face $faceIndex UV u0 $u0 v0 $v0 u1 $u1 v1 $v1 u2 $u2 v2 $v2"
+    //% group="Texture" weight=80
+    //% mesh.shadow=variables_get
+    //% inlineInputMode=inline
+    export function setFaceUV(mesh: Mesh3D, faceIndex: number,
+        u0: number, v0: number, u1: number, v1: number, u2: number, v2: number): void {
+        if (!mesh || faceIndex < 0 || faceIndex >= mesh.faces.length) return
+        const f = mesh.faces[faceIndex]
+        f.u0 = u0; f.v0 = v0
+        f.u1 = u1; f.v1 = v1
+        f.u2 = u2; f.v2 = v2
+    }
+
+    //% blockId=r3d_clear_mesh_tex block="clear $mesh texture"
+    //% group="Texture" weight=70
+    //% mesh.shadow=variables_get
+    export function clearMeshTexture(mesh: Mesh3D): void {
+        if (!mesh) return
+        for (let i = 0; i < mesh.faces.length; i++) {
+            mesh.faces[i].texId = -1
+        }
+    }
+
+    // Built-in textures
+
+    //% blockId=r3d_tex_brick block="brick texture"
+    //% group="Texture" weight=60
+    export function textureBrick(): number {
+        const img = image.create(8, 8)
+        // Row 0-2: brick row 1
+        for (let x = 0; x < 8; x++) {
+            img.setPixel(x, 0, 4)  // mortar line (orange)
+            for (let y = 1; y <= 3; y++) {
+                img.setPixel(x, y, 2) // red brick
+            }
+            img.setPixel(x, 4, 4)  // mortar line
+            for (let y = 5; y <= 7; y++) {
+                img.setPixel(x, y, 2) // red brick
+            }
+        }
+        // Vertical mortar - offset rows
+        img.setPixel(0, 1, 4); img.setPixel(0, 2, 4); img.setPixel(0, 3, 4)
+        img.setPixel(4, 5, 4); img.setPixel(4, 6, 4); img.setPixel(4, 7, 4)
+        return Rasterizer.registerTexture(img)
+    }
+
+    //% blockId=r3d_tex_window block="window wall texture"
+    //% group="Texture" weight=59
+    export function textureWindow(): number {
+        const img = image.create(8, 8)
+        // Wall background
+        img.fill(12)  // dark gray concrete
+        // Window pane (center)
+        for (let y = 1; y <= 5; y++) {
+            for (let x = 2; x <= 5; x++) {
+                img.setPixel(x, y, 9) // light blue glass
+            }
+        }
+        // Window frame
+        img.setPixel(2, 3, 12); img.setPixel(3, 3, 12)
+        img.setPixel(4, 3, 12); img.setPixel(5, 3, 12)
+        img.setPixel(3, 1, 12); img.setPixel(3, 2, 12)
+        img.setPixel(3, 4, 12); img.setPixel(3, 5, 12)
+        return Rasterizer.registerTexture(img)
+    }
+
+    //% blockId=r3d_tex_stone block="stone texture"
+    //% group="Texture" weight=58
+    export function textureStone(): number {
+        const img = image.create(8, 8)
+        img.fill(12) // dark gray base
+        // Stone pattern
+        img.setPixel(0, 0, 1); img.setPixel(1, 0, 1)
+        img.setPixel(2, 0, 12); img.setPixel(3, 0, 1)
+        img.setPixel(4, 0, 1); img.setPixel(5, 0, 12)
+        img.setPixel(6, 0, 1); img.setPixel(7, 0, 1)
+        for (let y = 1; y <= 3; y++) {
+            for (let x = 0; x < 8; x++) {
+                img.setPixel(x, y, 1) // white stone
+            }
+            img.setPixel(2, y, 12) // gap
+            img.setPixel(5, y, 12) // gap
+        }
+        img.fillRect(0, 4, 8, 1, 12) // mortar
+        for (let y = 5; y <= 7; y++) {
+            for (let x = 0; x < 8; x++) {
+                img.setPixel(x, y, 1) // white stone
+            }
+            img.setPixel(0, y, 12) // gap
+            img.setPixel(4, y, 12) // gap
+            img.setPixel(7, y, 12) // gap
+        }
+        return Rasterizer.registerTexture(img)
+    }
+
+    //% blockId=r3d_tex_wood block="wood texture"
+    //% group="Texture" weight=57
+    export function textureWood(): number {
+        const img = image.create(8, 8)
+        img.fill(14) // brown base
+        // Wood grain
+        for (let y = 0; y < 8; y++) {
+            img.setPixel(2, y, 4)  // orange grain
+            img.setPixel(5, y, 4)  // orange grain
+        }
+        img.setPixel(1, 2, 4); img.setPixel(3, 5, 4)
+        img.setPixel(6, 1, 4); img.setPixel(4, 6, 4)
+        // Knot
+        img.setPixel(6, 4, 15) // dark knot
+        return Rasterizer.registerTexture(img)
+    }
+
+    //% blockId=r3d_tex_grass block="grass texture"
+    //% group="Texture" weight=56
+    export function textureGrass(): number {
+        const img = image.create(8, 8)
+        img.fill(7)  // green
+        // Variation
+        img.setPixel(1, 1, 6); img.setPixel(5, 3, 6)
+        img.setPixel(3, 6, 6); img.setPixel(7, 0, 6)
+        img.setPixel(0, 4, 6); img.setPixel(6, 7, 6)
+        img.setPixel(2, 3, 5); img.setPixel(4, 1, 5) // yellow flowers
+        img.setPixel(7, 5, 5)
+        return Rasterizer.registerTexture(img)
+    }
+
+    //% blockId=r3d_tex_road block="road texture"
+    //% group="Texture" weight=55
+    export function textureRoad(): number {
+        const img = image.create(8, 8)
+        img.fill(15)  // black asphalt
+        // Road marking (white dashed line in center)
+        img.setPixel(3, 0, 1); img.setPixel(4, 0, 1)
+        img.setPixel(3, 1, 1); img.setPixel(4, 1, 1)
+        img.setPixel(3, 2, 1); img.setPixel(4, 2, 1)
+        // Gray variation
+        img.setPixel(1, 3, 12); img.setPixel(6, 5, 12)
+        img.setPixel(0, 7, 12); img.setPixel(5, 1, 12)
+        return Rasterizer.registerTexture(img)
     }
 }

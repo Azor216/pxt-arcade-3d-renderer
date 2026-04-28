@@ -7,31 +7,47 @@ class Tri3D {
     public i1: number
     public i2: number
     public color: number
+    // UV coordinates per vertex (0.0 - 1.0)
+    public u0: number; public v0: number
+    public u1: number; public v1: number
+    public u2: number; public v2: number
+    public texId: number  // -1 = no texture
 
     constructor(i0: number, i1: number, i2: number, color: number) {
         this.i0 = i0
         this.i1 = i1
         this.i2 = i2
         this.color = color
+        this.u0 = 0; this.v0 = 0
+        this.u1 = 1; this.v1 = 0
+        this.u2 = 0; this.v2 = 1
+        this.texId = -1
     }
 }
 
 class RenderFace {
-    public sx0: number
-    public sy0: number
-    public sx1: number
-    public sy1: number
-    public sx2: number
-    public sy2: number
+    public sx0: number; public sy0: number
+    public sx1: number; public sy1: number
+    public sx2: number; public sy2: number
     public color: number
     public depth: number
+    // Perspective-correct UV: store u/z, v/z, 1/z per vertex
+    public uz0: number; public vz0: number; public iz0: number
+    public uz1: number; public vz1: number; public iz1: number
+    public uz2: number; public vz2: number; public iz2: number
+    public texId: number
+    public shade: number  // 0=bright, 1=medium, 2=dark
 
     constructor() {
         this.sx0 = 0; this.sy0 = 0
         this.sx1 = 0; this.sy1 = 0
         this.sx2 = 0; this.sy2 = 0
-        this.color = 0
-        this.depth = 0
+        this.color = 0; this.depth = 0
+        this.uz0 = 0; this.vz0 = 0; this.iz0 = 0
+        this.uz1 = 0; this.vz1 = 0; this.iz1 = 0
+        this.uz2 = 0; this.vz2 = 0; this.iz2 = 0
+        this.texId = -1
+        this.shade = 0
     }
 }
 
@@ -61,6 +77,33 @@ namespace Rasterizer {
         if (light > 0.3) return col
         if (light > -0.2) return DARK[col]
         return DARK[DARK[col]]
+    }
+
+    export function shadeLevel(light: number): number {
+        if (light > 0.3) return 0
+        if (light > -0.2) return 1
+        return 2
+    }
+
+    export function shadePixel(col: number, shade: number): number {
+        if (col <= 0 || col > 15) return col
+        if (shade === 0) return col
+        if (shade === 1) return DARK[col]
+        return DARK[DARK[col]]
+    }
+
+    // ---- Texture storage ----
+    let _textures: Image[] = []
+
+    export function registerTexture(img: Image): number {
+        const id = _textures.length
+        _textures.push(img)
+        return id
+    }
+
+    export function getTexture(id: number): Image {
+        if (id >= 0 && id < _textures.length) return _textures[id]
+        return null
     }
 
     export function fillTriangle(
@@ -126,6 +169,105 @@ namespace Rasterizer {
             if (ixa <= ixb) {
                 img.fillRect(ixa, y, ixb - ixa + 1, 1, col)
             }
+        }
+    }
+
+    // Textured triangle rasterizer with perspective-correct UV
+    export function fillTriangleTex(
+        img: Image, tex: Image, shade: number,
+        x0: number, y0: number, uz0: number, vz0: number, iz0: number,
+        x1: number, y1: number, uz1: number, vz1: number, iz1: number,
+        x2: number, y2: number, uz2: number, vz2: number, iz2: number
+    ): void {
+        x0 = Math.round(x0); y0 = Math.round(y0)
+        x1 = Math.round(x1); y1 = Math.round(y1)
+        x2 = Math.round(x2); y2 = Math.round(y2)
+
+        const tw = tex.width
+        const th = tex.height
+        let tmp: number
+
+        // Sort by Y (carry UVZ along)
+        if (y0 > y1) {
+            tmp = x0; x0 = x1; x1 = tmp; tmp = y0; y0 = y1; y1 = tmp
+            tmp = uz0; uz0 = uz1; uz1 = tmp; tmp = vz0; vz0 = vz1; vz1 = tmp
+            tmp = iz0; iz0 = iz1; iz1 = tmp
+        }
+        if (y0 > y2) {
+            tmp = x0; x0 = x2; x2 = tmp; tmp = y0; y0 = y2; y2 = tmp
+            tmp = uz0; uz0 = uz2; uz2 = tmp; tmp = vz0; vz0 = vz2; vz2 = tmp
+            tmp = iz0; iz0 = iz2; iz2 = tmp
+        }
+        if (y1 > y2) {
+            tmp = x1; x1 = x2; x2 = tmp; tmp = y1; y1 = y2; y2 = tmp
+            tmp = uz1; uz1 = uz2; uz2 = tmp; tmp = vz1; vz1 = vz2; vz2 = tmp
+            tmp = iz1; iz1 = iz2; iz2 = tmp
+        }
+
+        const dy20 = y2 - y0
+        if (dy20 === 0) return
+        const dy10 = y1 - y0
+        const dy21 = y2 - y1
+        const idy20 = 1 / dy20
+
+        // Scanline helper
+        function scanline(y: number, xa: number, xb: number,
+            uza: number, vza: number, iza: number,
+            uzb: number, vzb: number, izb: number): void {
+            if (xa > xb) {
+                tmp = xa; xa = xb; xb = tmp
+                tmp = uza; uza = uzb; uzb = tmp
+                tmp = vza; vza = vzb; vzb = tmp
+                tmp = iza; iza = izb; izb = tmp
+            }
+            const ixa = Math.max(0, Math.ceil(xa))
+            const ixb = Math.min(159, Math.floor(xb))
+            if (ixa > ixb) return
+            const span = xb - xa
+            const ispan = span > 0 ? 1 / span : 0
+            for (let x = ixa; x <= ixb; x++) {
+                const t = (x - xa) * ispan
+                const iz = iza + (izb - iza) * t
+                if (iz < 0.0001) continue
+                const rz = 1 / iz
+                const u = (uza + (uzb - uza) * t) * rz
+                const v = (vza + (vzb - vza) * t) * rz
+                // Wrap UV to [0, tw) / [0, th)
+                let tx = Math.floor(u * tw) % tw
+                let ty = Math.floor(v * th) % th
+                if (tx < 0) tx += tw
+                if (ty < 0) ty += th
+                let c = tex.getPixel(tx, ty)
+                if (c === 0) continue  // transparent
+                c = shadePixel(c, shade)
+                img.setPixel(x, y, c)
+            }
+        }
+
+        // Upper half (y0 to y1)
+        const yS0 = Math.max(0, y0)
+        const yE0 = Math.min(119, y1)
+        for (let y = yS0; y <= yE0; y++) {
+            const a = (y - y0) * idy20
+            const b = dy10 > 0 ? (y - y0) / dy10 : 1
+            const xa = x0 + (x2 - x0) * a
+            const xb = x0 + (x1 - x0) * b
+            scanline(y, xa, xb,
+                uz0 + (uz2 - uz0) * a, vz0 + (vz2 - vz0) * a, iz0 + (iz2 - iz0) * a,
+                uz0 + (uz1 - uz0) * b, vz0 + (vz1 - vz0) * b, iz0 + (iz1 - iz0) * b)
+        }
+
+        // Lower half (y1+1 to y2)
+        const yS1 = Math.max(0, y1 + 1)
+        const yE1 = Math.min(119, y2)
+        for (let y = yS1; y <= yE1; y++) {
+            const a = (y - y0) * idy20
+            const b = dy21 > 0 ? (y - y1) / dy21 : 1
+            const xa = x0 + (x2 - x0) * a
+            const xb = x1 + (x2 - x1) * b
+            scanline(y, xa, xb,
+                uz0 + (uz2 - uz0) * a, vz0 + (vz2 - vz0) * a, iz0 + (iz2 - iz0) * a,
+                uz1 + (uz2 - uz1) * b, vz1 + (vz2 - vz1) * b, iz1 + (iz2 - iz1) * b)
         }
     }
 }
