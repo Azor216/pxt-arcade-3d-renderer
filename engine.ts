@@ -279,9 +279,9 @@ namespace Render3D {
                     const sx2 = cv2.x * focalLen / cv2.z + HW
                     const sy2 = -cv2.y * focalLen / cv2.z + HH
 
-                    // Backface culling
+                    // Backface culling (Y is flipped in screen projection)
                     const area = (sx1 - sx0) * (sy2 - sy0) - (sx2 - sx0) * (sy1 - sy0)
-                    if (area >= 0) continue
+                    if (area <= 0) continue
 
                     // Off-screen rejection
                     const minSx = Math.min(sx0, Math.min(sx1, sx2))
