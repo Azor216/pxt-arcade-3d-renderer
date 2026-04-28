@@ -183,7 +183,9 @@ namespace Render3D {
                 if (behind === 0) {
                     // No clipping needed
                     clipped.push(v0); clipped.push(v1); clipped.push(v2)
-                    clippedUV.push(face.u0, face.v0, face.u1, face.v1, face.u2, face.v2)
+                    clippedUV.push(face.u0); clippedUV.push(face.v0)
+                    clippedUV.push(face.u1); clippedUV.push(face.v1)
+                    clippedUV.push(face.u2); clippedUV.push(face.v2)
                 } else {
                     // Near-plane clip: put all 3 verts in array, in/out classification
                     const verts = [v0, v1, v2]
@@ -221,10 +223,14 @@ namespace Render3D {
                                      uvs[bi * 2 + 1] + (uvs[ci * 2 + 1] - uvs[bi * 2 + 1]) * tc]
                         // Triangle 1: va, na, vc
                         clipped.push(va); clipped.push(na); clipped.push(vc)
-                        clippedUV.push(uvs[ai * 2], uvs[ai * 2 + 1], uva[0], uva[1], uvs[ci * 2], uvs[ci * 2 + 1])
+                        clippedUV.push(uvs[ai * 2]); clippedUV.push(uvs[ai * 2 + 1])
+                        clippedUV.push(uva[0]); clippedUV.push(uva[1])
+                        clippedUV.push(uvs[ci * 2]); clippedUV.push(uvs[ci * 2 + 1])
                         // Triangle 2: na, nc, vc
                         clipped.push(na); clipped.push(nc); clipped.push(vc)
-                        clippedUV.push(uva[0], uva[1], uvc[0], uvc[1], uvs[ci * 2], uvs[ci * 2 + 1])
+                        clippedUV.push(uva[0]); clippedUV.push(uva[1])
+                        clippedUV.push(uvc[0]); clippedUV.push(uvc[1])
+                        clippedUV.push(uvs[ci * 2]); clippedUV.push(uvs[ci * 2 + 1])
                     } else {
                         // 2 vertices behind → clip to 1 triangle
                         let fi2 = 0
@@ -253,7 +259,9 @@ namespace Render3D {
                         const uvr0 = uvs[fi2 * 2] + (uvs[ri * 2] - uvs[fi2 * 2]) * tr
                         const uvr1 = uvs[fi2 * 2 + 1] + (uvs[ri * 2 + 1] - uvs[fi2 * 2 + 1]) * tr
                         clipped.push(vf); clipped.push(nl); clipped.push(nr)
-                        clippedUV.push(uvs[fi2 * 2], uvs[fi2 * 2 + 1], uvl0, uvl1, uvr0, uvr1)
+                        clippedUV.push(uvs[fi2 * 2]); clippedUV.push(uvs[fi2 * 2 + 1])
+                        clippedUV.push(uvl0); clippedUV.push(uvl1)
+                        clippedUV.push(uvr0); clippedUV.push(uvr1)
                     }
                 }
 
