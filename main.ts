@@ -10,6 +10,10 @@ class Mesh3D {
     public rotation: Vec3
     public _scale: number
     public _id: number
+    public _collider: boolean
+    public _bboxW: number
+    public _bboxH: number
+    public _bboxD: number
     private static _nextId: number = 0
 
     constructor() {
@@ -19,6 +23,10 @@ class Mesh3D {
         this.rotation = new Vec3(0, 0, 0)
         this._scale = 1
         this._id = Mesh3D._nextId++
+        this._collider = false
+        this._bboxW = 0
+        this._bboxH = 0
+        this._bboxD = 0
     }
 }
 
@@ -261,18 +269,43 @@ namespace Render3D {
     //% group="Camera" weight=70
     //% amount.defl=0.1
     export function moveCameraForward(amount: number): void {
-        const cam = ensureScene().camera
-        cam.position.x += Math.sin(cam.yaw) * amount
-        cam.position.z += Math.cos(cam.yaw) * amount
+        const sc = ensureScene()
+        const cam = sc.camera
+        const nx = cam.position.x + Math.sin(cam.yaw) * amount
+        const nz = cam.position.z + Math.cos(cam.yaw) * amount
+        if (!_checkCollisionXZ(sc, nx, cam.position.y, nz)) {
+            cam.position.x = nx
+            cam.position.z = nz
+        } else {
+            // Slide along axes
+            if (!_checkCollisionXZ(sc, nx, cam.position.y, cam.position.z)) {
+                cam.position.x = nx
+            }
+            if (!_checkCollisionXZ(sc, cam.position.x, cam.position.y, nz)) {
+                cam.position.z = nz
+            }
+        }
     }
 
     //% blockId=r3d_cam_right block="move camera right by $amount"
     //% group="Camera" weight=69
     //% amount.defl=0.1
     export function moveCameraRight(amount: number): void {
-        const cam = ensureScene().camera
-        cam.position.x += Math.cos(cam.yaw) * amount
-        cam.position.z += -Math.sin(cam.yaw) * amount
+        const sc = ensureScene()
+        const cam = sc.camera
+        const nx = cam.position.x + Math.cos(cam.yaw) * amount
+        const nz = cam.position.z + (-Math.sin(cam.yaw)) * amount
+        if (!_checkCollisionXZ(sc, nx, cam.position.y, nz)) {
+            cam.position.x = nx
+            cam.position.z = nz
+        } else {
+            if (!_checkCollisionXZ(sc, nx, cam.position.y, cam.position.z)) {
+                cam.position.x = nx
+            }
+            if (!_checkCollisionXZ(sc, cam.position.x, cam.position.y, nz)) {
+                cam.position.z = nz
+            }
+        }
     }
 
     //% blockId=r3d_cam_up block="move camera up by $amount"
@@ -350,6 +383,10 @@ namespace Render3D {
         ]
 
         mesh.position = new Vec3(x, y, z)
+        mesh._collider = true
+        mesh._bboxW = w
+        mesh._bboxH = h
+        mesh._bboxD = d
         ensureScene().meshes.push(mesh)
         return mesh
     }
@@ -567,6 +604,47 @@ namespace Render3D {
                 break
             }
         }
+    }
+
+    // ===================== COLLISION =====================
+
+    const CAM_RADIUS = 0.4
+
+    function _checkCollisionXZ(sc: Scene3D, cx: number, cy: number, cz: number): boolean {
+        for (let i = 0; i < sc.meshes.length; i++) {
+            const m = sc.meshes[i]
+            if (!m._collider) continue
+            const hw = m._bboxW * m._scale / 2 + CAM_RADIUS
+            const hh = m._bboxH * m._scale / 2
+            const hd = m._bboxD * m._scale / 2 + CAM_RADIUS
+            const dx = cx - m.position.x
+            const dy = cy - m.position.y
+            const dz = cz - m.position.z
+            if (dx > -hw && dx < hw && dz > -hd && dz < hd && dy > -hh && dy < hh) {
+                return true
+            }
+        }
+        return false
+    }
+
+    //% blockId=r3d_set_collider block="set $mesh collider $enabled"
+    //% group="Transform" weight=55
+    //% mesh.shadow=variables_get
+    //% enabled.defl=true
+    export function setCollider(mesh: Mesh3D, enabled: boolean): void {
+        if (!mesh) return
+        mesh._collider = enabled
+    }
+
+    //% blockId=r3d_set_bbox block="set $mesh bounding box w $w h $h d $d"
+    //% group="Transform" weight=54
+    //% mesh.shadow=variables_get
+    export function setBoundingBox(mesh: Mesh3D, w: number, h: number, d: number): void {
+        if (!mesh) return
+        mesh._bboxW = w
+        mesh._bboxH = h
+        mesh._bboxD = d
+        mesh._collider = true
     }
 
     // ===================== LIGHT =====================
