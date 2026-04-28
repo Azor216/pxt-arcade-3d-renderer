@@ -152,52 +152,122 @@ namespace Render3D {
                 const v1 = cvs[face.i1]
                 const v2 = cvs[face.i2]
 
-                // Near plane clipping
-                if (v0.z < NEAR || v1.z < NEAR || v2.z < NEAR) continue
+                // Count vertices behind near plane
+                const b0 = v0.z < NEAR ? 1 : 0
+                const b1 = v1.z < NEAR ? 1 : 0
+                const b2 = v2.z < NEAR ? 1 : 0
+                const behind = b0 + b1 + b2
 
-                // Perspective projection
-                const sx0 = v0.x * focalLen / v0.z + HW
-                const sy0 = -v0.y * focalLen / v0.z + HH
-                const sx1 = v1.x * focalLen / v1.z + HW
-                const sy1 = -v1.y * focalLen / v1.z + HH
-                const sx2 = v2.x * focalLen / v2.z + HW
-                const sy2 = -v2.y * focalLen / v2.z + HH
-
-                // Backface culling (screen space signed area)
-                const area = (sx1 - sx0) * (sy2 - sy0) - (sx2 - sx0) * (sy1 - sy0)
-                if (area >= 0) continue
-
-                // Off-screen rejection
-                const minSx = Math.min(sx0, Math.min(sx1, sx2))
-                const maxSx = Math.max(sx0, Math.max(sx1, sx2))
-                const minSy = Math.min(sy0, Math.min(sy1, sy2))
-                const maxSy = Math.max(sy0, Math.max(sy1, sy2))
-                if (maxSx < 0 || minSx >= SW || maxSy < 0 || minSy >= SH) continue
+                // All behind → skip
+                if (behind === 3) continue
 
                 // Compute face normal in world space for lighting
                 const e1 = mesh.vertices[face.i1].sub(mesh.vertices[face.i0])
                 const e2 = mesh.vertices[face.i2].sub(mesh.vertices[face.i0])
                 let normal = e1.cross(e2).normalize()
-
-                // Apply mesh rotation to normal
                 if (mesh.rotation.y !== 0) normal = Math3D.rotateY(normal, mesh.rotation.y)
                 if (mesh.rotation.x !== 0) normal = Math3D.rotateX(normal, mesh.rotation.x)
                 if (mesh.rotation.z !== 0) normal = Math3D.rotateZ(normal, mesh.rotation.z)
-
-                // Lighting
                 const light = normal.dot(sc.lightDir)
                 const shadedColor = Rasterizer.shadeColor(face.color, light)
 
-                // Average depth for painter's algorithm
-                const avgZ = (v0.z + v1.z + v2.z) / 3
+                // Collect clipped triangles (camera-space vertices)
+                const clipped: Vec3[] = []
 
-                const rf = new RenderFace()
-                rf.sx0 = sx0; rf.sy0 = sy0
-                rf.sx1 = sx1; rf.sy1 = sy1
-                rf.sx2 = sx2; rf.sy2 = sy2
-                rf.color = shadedColor
-                rf.depth = avgZ
-                renderList.push(rf)
+                if (behind === 0) {
+                    // No clipping needed
+                    clipped.push(v0); clipped.push(v1); clipped.push(v2)
+                } else {
+                    // Near-plane clip: put all 3 verts in array, in/out classification
+                    const verts = [v0, v1, v2]
+                    const inside: boolean[] = [!b0, !b1, !b2]
+
+                    if (behind === 1) {
+                        // 1 vertex behind → clip to 2 triangles (quad)
+                        let bi = 0
+                        if (!inside[0]) bi = 0
+                        else if (!inside[1]) bi = 1
+                        else bi = 2
+                        const ai = (bi + 1) % 3
+                        const ci = (bi + 2) % 3
+                        const va = verts[ai]
+                        const vb = verts[bi]
+                        const vc = verts[ci]
+                        // Clip edge vb→va and vb→vc
+                        const ta = (NEAR - vb.z) / (va.z - vb.z)
+                        const tc = (NEAR - vb.z) / (vc.z - vb.z)
+                        const na = new Vec3(
+                            vb.x + (va.x - vb.x) * ta,
+                            vb.y + (va.y - vb.y) * ta,
+                            NEAR
+                        )
+                        const nc = new Vec3(
+                            vb.x + (vc.x - vb.x) * tc,
+                            vb.y + (vc.y - vb.y) * tc,
+                            NEAR
+                        )
+                        // Triangle 1: va, na, vc
+                        clipped.push(va); clipped.push(na); clipped.push(vc)
+                        // Triangle 2: na, nc, vc
+                        clipped.push(na); clipped.push(nc); clipped.push(vc)
+                    } else {
+                        // 2 vertices behind → clip to 1 triangle
+                        let fi2 = 0
+                        if (inside[0]) fi2 = 0
+                        else if (inside[1]) fi2 = 1
+                        else fi2 = 2
+                        const vf = verts[fi2]
+                        const vl = verts[(fi2 + 1) % 3]
+                        const vr = verts[(fi2 + 2) % 3]
+                        const tl = (NEAR - vf.z) / (vl.z - vf.z)
+                        const tr = (NEAR - vf.z) / (vr.z - vf.z)
+                        const nl = new Vec3(
+                            vf.x + (vl.x - vf.x) * tl,
+                            vf.y + (vl.y - vf.y) * tl,
+                            NEAR
+                        )
+                        const nr = new Vec3(
+                            vf.x + (vr.x - vf.x) * tr,
+                            vf.y + (vr.y - vf.y) * tr,
+                            NEAR
+                        )
+                        clipped.push(vf); clipped.push(nl); clipped.push(nr)
+                    }
+                }
+
+                // Project and emit clipped triangles
+                for (let ti = 0; ti < clipped.length; ti += 3) {
+                    const cv0 = clipped[ti]
+                    const cv1 = clipped[ti + 1]
+                    const cv2 = clipped[ti + 2]
+
+                    const sx0 = cv0.x * focalLen / cv0.z + HW
+                    const sy0 = -cv0.y * focalLen / cv0.z + HH
+                    const sx1 = cv1.x * focalLen / cv1.z + HW
+                    const sy1 = -cv1.y * focalLen / cv1.z + HH
+                    const sx2 = cv2.x * focalLen / cv2.z + HW
+                    const sy2 = -cv2.y * focalLen / cv2.z + HH
+
+                    // Backface culling
+                    const area = (sx1 - sx0) * (sy2 - sy0) - (sx2 - sx0) * (sy1 - sy0)
+                    if (area >= 0) continue
+
+                    // Off-screen rejection
+                    const minSx = Math.min(sx0, Math.min(sx1, sx2))
+                    const maxSx = Math.max(sx0, Math.max(sx1, sx2))
+                    const minSy = Math.min(sy0, Math.min(sy1, sy2))
+                    const maxSy = Math.max(sy0, Math.max(sy1, sy2))
+                    if (maxSx < 0 || minSx >= SW || maxSy < 0 || minSy >= SH) continue
+
+                    const avgZ = (cv0.z + cv1.z + cv2.z) / 3
+                    const rf = new RenderFace()
+                    rf.sx0 = sx0; rf.sy0 = sy0
+                    rf.sx1 = sx1; rf.sy1 = sy1
+                    rf.sx2 = sx2; rf.sy2 = sy2
+                    rf.color = shadedColor
+                    rf.depth = avgZ
+                    renderList.push(rf)
+                }
             }
         }
 
@@ -285,6 +355,7 @@ namespace Render3D {
                 cam.position.z = nz
             }
         }
+        _pushOut(sc)
     }
 
     //% blockId=r3d_cam_right block="move camera right by $amount"
@@ -306,6 +377,7 @@ namespace Render3D {
                 cam.position.z = nz
             }
         }
+        _pushOut(sc)
     }
 
     //% blockId=r3d_cam_up block="move camera up by $amount"
@@ -608,7 +680,7 @@ namespace Render3D {
 
     // ===================== COLLISION =====================
 
-    const CAM_RADIUS = 0.4
+    const CAM_RADIUS = 0.8
     const CAM_HEIGHT = 2.0  // výška těla kamery (od nohou k očím)
 
     function _checkCollisionXZ(sc: Scene3D, cx: number, cy: number, cz: number): boolean {
@@ -630,6 +702,39 @@ namespace Render3D {
             }
         }
         return false
+    }
+
+    // Push camera out of any colliding object
+    function _pushOut(sc: Scene3D): void {
+        const cam = sc.camera
+        const camBottom = cam.position.y - CAM_HEIGHT
+        for (let i = 0; i < sc.meshes.length; i++) {
+            const m = sc.meshes[i]
+            if (!m._collider) continue
+            const hw = m._bboxW * m._scale / 2 + CAM_RADIUS
+            const hh = m._bboxH * m._scale / 2
+            const hd = m._bboxD * m._scale / 2 + CAM_RADIUS
+            const dx = cam.position.x - m.position.x
+            const dz = cam.position.z - m.position.z
+            const boxTop = m.position.y + hh
+            const boxBottom = m.position.y - hh
+            if (dx > -hw && dx < hw && dz > -hd && dz < hd &&
+                camBottom < boxTop && cam.position.y > boxBottom) {
+                // Camera is inside this collider – push out on shortest axis
+                const pushXp = hw - dx    // push in +X
+                const pushXn = hw + dx    // push in -X
+                const pushZp = hd - dz    // push in +Z
+                const pushZn = hd + dz    // push in -Z
+                const minPush = Math.min(
+                    Math.min(pushXp, pushXn),
+                    Math.min(pushZp, pushZn)
+                )
+                if (minPush === pushXp) cam.position.x = m.position.x + hw
+                else if (minPush === pushXn) cam.position.x = m.position.x - hw
+                else if (minPush === pushZp) cam.position.z = m.position.z + hd
+                else cam.position.z = m.position.z - hd
+            }
+        }
     }
 
     //% blockId=r3d_set_collider block="set $mesh collider $enabled"
