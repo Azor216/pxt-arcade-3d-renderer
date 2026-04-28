@@ -609,8 +609,10 @@ namespace Render3D {
     // ===================== COLLISION =====================
 
     const CAM_RADIUS = 0.4
+    const CAM_HEIGHT = 2.0  // výška těla kamery (od nohou k očím)
 
     function _checkCollisionXZ(sc: Scene3D, cx: number, cy: number, cz: number): boolean {
+        const camBottom = cy - CAM_HEIGHT
         for (let i = 0; i < sc.meshes.length; i++) {
             const m = sc.meshes[i]
             if (!m._collider) continue
@@ -618,9 +620,12 @@ namespace Render3D {
             const hh = m._bboxH * m._scale / 2
             const hd = m._bboxD * m._scale / 2 + CAM_RADIUS
             const dx = cx - m.position.x
-            const dy = cy - m.position.y
             const dz = cz - m.position.z
-            if (dx > -hw && dx < hw && dz > -hd && dz < hd && dy > -hh && dy < hh) {
+            const boxTop = m.position.y + hh
+            const boxBottom = m.position.y - hh
+            // XZ overlap + Y overlap (camera body vs box)
+            if (dx > -hw && dx < hw && dz > -hd && dz < hd &&
+                camBottom < boxTop && cy > boxBottom) {
                 return true
             }
         }
