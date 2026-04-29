@@ -75,8 +75,7 @@ namespace Rasterizer {
     export function shadeColor(col: number, light: number): number {
         if (col <= 0 || col > 15) return col
         if (light > 0.3) return col
-        if (light > -0.2) return DARK[col]
-        return DARK[DARK[col]]
+        return DARK[col]  // max 1 level darkening
     }
 
     export function shadeLevel(light: number): number {
