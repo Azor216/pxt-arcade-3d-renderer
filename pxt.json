@@ -1,14 +1,15 @@
 {
     "name": "arcade-3d-engine",
-    "version": "1.5.0",
-    "description": "Real 3D rendering engine for MakeCode Arcade with perspective projection, lighting, and primitive shapes",
+    "version": "1.6.0",
+    "description": "Real 3D rendering engine with map editor for MakeCode Arcade",
     "dependencies": {
         "device": "*"
     },
     "files": [
         "math3d.ts",
         "render3d.ts",
-        "engine.ts"
+        "engine.ts",
+        "map3d.ts"
     ],
     "testFiles": [
         "test.ts"
