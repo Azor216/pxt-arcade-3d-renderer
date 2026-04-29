@@ -50,6 +50,13 @@ class Scene3D {
     public lightDir: Vec3
     public skyColor: number
     public groundColor: number
+    public billboards: Billboard3D[]
+    public skyboxImg: Image
+    // Gravity
+    public gravity: number
+    public camVelY: number
+    public camOnGround: boolean
+    public groundY: number
 
     constructor() {
         this.meshes = []
@@ -58,6 +65,25 @@ class Scene3D {
         this.lightDir = this.lightDir.normalize()
         this.skyColor = 9
         this.groundColor = 15
+        this.billboards = []
+        this.skyboxImg = null
+        this.gravity = 0
+        this.camVelY = 0
+        this.camOnGround = true
+        this.groundY = 0
+    }
+}
+
+class Billboard3D {
+    public position: Vec3
+    public img: Image
+    public _id: number
+    private static _nextId: number = 0
+
+    constructor(pos: Vec3, img: Image) {
+        this.position = pos
+        this.img = img
+        this._id = Billboard3D._nextId++
     }
 }
 
@@ -66,7 +92,7 @@ class Scene3D {
 // ============================================================
 
 //% color="#4b7bec" weight=100 icon="\uf1b2"
-//% groups="['Scene', 'Camera', 'Objects', 'Transform', 'Texture', 'Light']"
+//% groups="['Scene', 'Camera', 'Objects', 'Transform', 'Texture', 'Light', 'Billboard', 'Terrain', 'Physics']"
 namespace Render3D {
     const SW = 160
     const SH = 120
@@ -94,21 +120,30 @@ namespace Render3D {
     export function render(): void {
         const sc = ensureScene()
 
+        // Apply gravity
+        if (sc.gravity > 0) {
+            _applyGravity(sc)
+        }
+
         // Push camera out if a moving mesh pushed into it
         _pushOut(sc)
 
         const img = scene.backgroundImage()
         img.fill(0)
 
-        // Sky gradient
-        img.fillRect(0, 0, SW, 15, 6)
-        img.fillRect(0, 15, SW, HH - 15, sc.skyColor)
+        const cam = sc.camera
+        const focalLen = HW / Math.tan(cam.fov * Math.PI / 360)
+
+        // Sky
+        if (sc.skyboxImg) {
+            _renderSkybox(img, sc.skyboxImg, cam.yaw)
+        } else {
+            img.fillRect(0, 0, SW, 15, 6)
+            img.fillRect(0, 15, SW, HH - 15, sc.skyColor)
+        }
 
         // Ground
         img.fillRect(0, HH, SW, HH, sc.groundColor)
-
-        const cam = sc.camera
-        const focalLen = HW / Math.tan(cam.fov * Math.PI / 360)
 
         // Precompute camera rotation
         const cosY = Math.cos(-cam.yaw)
@@ -280,10 +315,9 @@ namespace Render3D {
                     const sy2 = -cv2.y * focalLen / cv2.z + HH
 
                     // Skip degenerate triangles
-                    // No backface culling - painter's algorithm handles visibility
-                    // Only skip degenerate (zero-area) triangles
                     const area = (sx1 - sx0) * (sy2 - sy0) - (sx2 - sx0) * (sy1 - sy0)
-                    if (area === 0) continue
+                    // Y is flipped in projection, so front faces have positive area
+                    if (area <= 0) continue
 
                     // Off-screen rejection
                     const minSx = Math.min(sx0, Math.min(sx1, sx2))
@@ -338,6 +372,9 @@ namespace Render3D {
                 )
             }
         }
+
+        // Render billboards
+        _renderBillboards(img, sc, focalLen, cosY, sinY, cosP, sinP)
     }
 
     //% blockId=r3d_set_sky block="set sky color $color"
@@ -993,5 +1030,343 @@ namespace Render3D {
         img.setPixel(1, 3, 12); img.setPixel(6, 5, 12)
         img.setPixel(0, 7, 12); img.setPixel(5, 1, 12)
         return Rasterizer.registerTexture(img)
+    }
+
+    // ===================== OBJECTS: CYLINDER & SPHERE =====================
+
+    //% blockId=r3d_add_cylinder block="add cylinder at x $x y $y z $z||radius $r height $h segments $seg color $color"
+    //% group="Objects" weight=78
+    //% x.defl=0 y.defl=0 z.defl=0 r.defl=0.5 h.defl=2 seg.defl=8
+    //% color.shadow=colorindexpicker
+    //% inlineInputMode=inline
+    export function addCylinder(x: number, y: number, z: number, r: number, h: number, seg: number, color: number): Mesh3D {
+        const mesh = new Mesh3D()
+        if (seg < 4) seg = 4
+        if (seg > 16) seg = 16
+        const hh = h / 2
+        // Bottom ring (0..seg-1), top ring (seg..2*seg-1), bottom center (2*seg), top center (2*seg+1)
+        for (let i = 0; i < seg; i++) {
+            const a = i * 2 * Math.PI / seg
+            const cx2 = Math.cos(a) * r
+            const cz = Math.sin(a) * r
+            mesh.vertices.push(new Vec3(cx2, -hh, cz))
+        }
+        for (let i = 0; i < seg; i++) {
+            const a = i * 2 * Math.PI / seg
+            mesh.vertices.push(new Vec3(Math.cos(a) * r, hh, Math.sin(a) * r))
+        }
+        mesh.vertices.push(new Vec3(0, -hh, 0)) // bottom center
+        mesh.vertices.push(new Vec3(0, hh, 0))  // top center
+        const bc = seg * 2
+        const tc = seg * 2 + 1
+        for (let i = 0; i < seg; i++) {
+            const n = (i + 1) % seg
+            // Side quad
+            mesh.faces.push(new Tri3D(i, n, n + seg, color))
+            mesh.faces.push(new Tri3D(i, n + seg, i + seg, color))
+            // Bottom fan
+            mesh.faces.push(new Tri3D(bc, n, i, color))
+            // Top fan
+            mesh.faces.push(new Tri3D(tc, i + seg, n + seg, color))
+        }
+        mesh.position = new Vec3(x, y, z)
+        mesh._collider = true
+        mesh._bboxW = r * 2
+        mesh._bboxH = h
+        mesh._bboxD = r * 2
+        ensureScene().meshes.push(mesh)
+        return mesh
+    }
+
+    //% blockId=r3d_add_sphere block="add sphere at x $x y $y z $z||radius $r rings $rings segs $segs color $color"
+    //% group="Objects" weight=77
+    //% x.defl=0 y.defl=0 z.defl=0 r.defl=1 rings.defl=5 segs.defl=8
+    //% color.shadow=colorindexpicker
+    //% inlineInputMode=inline
+    export function addSphere(x: number, y: number, z: number, r: number, rings: number, segs: number, color: number): Mesh3D {
+        const mesh = new Mesh3D()
+        if (rings < 3) rings = 3
+        if (rings > 10) rings = 10
+        if (segs < 4) segs = 4
+        if (segs > 12) segs = 12
+        // Top pole
+        mesh.vertices.push(new Vec3(0, r, 0))
+        // Rings
+        for (let ri = 1; ri < rings; ri++) {
+            const phi = ri * Math.PI / rings
+            const sinP2 = Math.sin(phi)
+            const cosP2 = Math.cos(phi)
+            for (let si = 0; si < segs; si++) {
+                const theta = si * 2 * Math.PI / segs
+                mesh.vertices.push(new Vec3(
+                    sinP2 * Math.cos(theta) * r,
+                    cosP2 * r,
+                    sinP2 * Math.sin(theta) * r
+                ))
+            }
+        }
+        // Bottom pole
+        const botIdx = mesh.vertices.length
+        mesh.vertices.push(new Vec3(0, -r, 0))
+        // Top cap
+        for (let si = 0; si < segs; si++) {
+            mesh.faces.push(new Tri3D(0, 1 + si, 1 + (si + 1) % segs, color))
+        }
+        // Middle strips
+        for (let ri = 0; ri < rings - 2; ri++) {
+            const row0 = 1 + ri * segs
+            const row1 = 1 + (ri + 1) * segs
+            for (let si = 0; si < segs; si++) {
+                const n = (si + 1) % segs
+                mesh.faces.push(new Tri3D(row0 + si, row1 + si, row1 + n, color))
+                mesh.faces.push(new Tri3D(row0 + si, row1 + n, row0 + n, color))
+            }
+        }
+        // Bottom cap
+        const lastRow = 1 + (rings - 2) * segs
+        for (let si = 0; si < segs; si++) {
+            mesh.faces.push(new Tri3D(botIdx, lastRow + (si + 1) % segs, lastRow + si, color))
+        }
+        mesh.position = new Vec3(x, y, z)
+        mesh._collider = true
+        mesh._bboxW = r * 2
+        mesh._bboxH = r * 2
+        mesh._bboxD = r * 2
+        ensureScene().meshes.push(mesh)
+        return mesh
+    }
+
+    // ===================== BILLBOARD =====================
+
+    //% blockId=r3d_add_billboard block="add billboard at x $x y $y z $z image $img"
+    //% group="Billboard" weight=100
+    //% img.shadow=screen_image_picker
+    export function addBillboard(x: number, y: number, z: number, img: Image): Billboard3D {
+        const bb = new Billboard3D(new Vec3(x, y, z), img)
+        ensureScene().billboards.push(bb)
+        return bb
+    }
+
+    //% blockId=r3d_move_billboard block="move billboard $bb to x $x y $y z $z"
+    //% group="Billboard" weight=90
+    //% bb.shadow=variables_get
+    export function moveBillboard(bb: Billboard3D, x: number, y: number, z: number): void {
+        if (!bb) return
+        bb.position.x = x
+        bb.position.y = y
+        bb.position.z = z
+    }
+
+    //% blockId=r3d_remove_billboard block="remove billboard $bb"
+    //% group="Billboard" weight=80
+    //% bb.shadow=variables_get
+    export function removeBillboard(bb: Billboard3D): void {
+        if (!bb) return
+        const sc = ensureScene()
+        for (let i = sc.billboards.length - 1; i >= 0; i--) {
+            if (sc.billboards[i]._id === bb._id) {
+                sc.billboards.splice(i, 1)
+                break
+            }
+        }
+    }
+
+    function _renderBillboards(img: Image, sc: Scene3D, focalLen: number,
+        cosY: number, sinY: number, cosP: number, sinP: number): void {
+        const cam = sc.camera
+        for (let bi = 0; bi < sc.billboards.length; bi++) {
+            const bb = sc.billboards[bi]
+            // Camera transform
+            const dx = bb.position.x - cam.position.x
+            const dy = bb.position.y - cam.position.y
+            const dz = bb.position.z - cam.position.z
+            const rx = dx * cosY + dz * sinY
+            const rz1 = -dx * sinY + dz * cosY
+            const ry = dy * cosP - rz1 * sinP
+            const rz = dy * sinP + rz1 * cosP
+            if (rz < NEAR) continue
+            // Project center
+            const sx = rx * focalLen / rz + HW
+            const sy = -ry * focalLen / rz + HH
+            // Scale sprite based on distance
+            const scale = focalLen / rz
+            const bw = bb.img.width
+            const bh = bb.img.height
+            const dw = Math.round(bw * scale * 0.1)
+            const dh = Math.round(bh * scale * 0.1)
+            if (dw < 1 || dh < 1) continue
+            const x0 = Math.round(sx - dw / 2)
+            const y0 = Math.round(sy - dh)
+            // Draw scaled sprite
+            for (let py = 0; py < dh; py++) {
+                const srcY = Math.floor(py * bh / dh)
+                const screenY = y0 + py
+                if (screenY < 0 || screenY >= SH) continue
+                for (let px = 0; px < dw; px++) {
+                    const srcX = Math.floor(px * bw / dw)
+                    const screenX = x0 + px
+                    if (screenX < 0 || screenX >= SW) continue
+                    const c = bb.img.getPixel(srcX, srcY)
+                    if (c !== 0) img.setPixel(screenX, screenY, c)
+                }
+            }
+        }
+    }
+
+    // ===================== SKYBOX =====================
+
+    //% blockId=r3d_set_skybox block="set skybox image $img"
+    //% group="Scene" weight=75
+    //% img.shadow=screen_image_picker
+    export function setSkybox(img: Image): void {
+        ensureScene().skyboxImg = img
+    }
+
+    //% blockId=r3d_clear_skybox block="clear skybox"
+    //% group="Scene" weight=74
+    export function clearSkybox(): void {
+        ensureScene().skyboxImg = null
+    }
+
+    function _renderSkybox(img: Image, sky: Image, yaw: number): void {
+        const skyW = sky.width
+        const skyH = sky.height
+        // Map yaw to horizontal offset in panoramic image
+        const offset = Math.floor((-yaw / (2 * Math.PI)) * skyW) % skyW
+        for (let x = 0; x < SW; x++) {
+            let srcX = (offset + Math.floor(x * skyW / SW)) % skyW
+            if (srcX < 0) srcX += skyW
+            for (let y = 0; y < HH; y++) {
+                const srcY = Math.floor(y * skyH / HH)
+                const c = sky.getPixel(srcX, srcY)
+                if (c !== 0) img.setPixel(x, y, c)
+            }
+        }
+    }
+
+    // ===================== TERRAIN =====================
+
+    //% blockId=r3d_add_terrain block="add terrain from heightmap $hmap||size $size height $maxH color $color"
+    //% group="Terrain" weight=100
+    //% hmap.shadow=screen_image_picker
+    //% size.defl=20 maxH.defl=5
+    //% color.shadow=colorindexpicker
+    //% inlineInputMode=inline
+    export function addTerrain(hmap: Image, size: number, maxH: number, color: number): Mesh3D {
+        const mesh = new Mesh3D()
+        const w = hmap.width
+        const h = hmap.height
+        const cellW = size / (w - 1)
+        const cellH = size / (h - 1)
+        const hs = size / 2
+        // Create vertices from heightmap (brightness = height)
+        for (let hy = 0; hy < h; hy++) {
+            for (let hx = 0; hx < w; hx++) {
+                const pixel = hmap.getPixel(hx, hy)
+                // Map palette index to height (0=low, 15=high)
+                const elev = (pixel / 15) * maxH
+                mesh.vertices.push(new Vec3(
+                    hx * cellW - hs,
+                    elev,
+                    hy * cellH - hs
+                ))
+            }
+        }
+        // Create faces (2 triangles per cell)
+        for (let hy = 0; hy < h - 1; hy++) {
+            for (let hx = 0; hx < w - 1; hx++) {
+                const i = hy * w + hx
+                // Use different greens based on height
+                const avgH = (hmap.getPixel(hx, hy) + hmap.getPixel(hx + 1, hy + 1)) / 2
+                let c = color
+                if (avgH > 10) c = 1  // white (snow)
+                else if (avgH > 7) c = 12  // gray (rock)
+                mesh.faces.push(new Tri3D(i, i + w, i + w + 1, c))
+                mesh.faces.push(new Tri3D(i, i + w + 1, i + 1, c))
+            }
+        }
+        mesh.position = new Vec3(0, 0, 0)
+        ensureScene().meshes.push(mesh)
+        return mesh
+    }
+
+    // ===================== PHYSICS =====================
+
+    //% blockId=r3d_enable_gravity block="enable gravity $g ground at y $groundY"
+    //% group="Physics" weight=100
+    //% g.defl=0.01 groundY.defl=1.5
+    export function enableGravity(g: number, groundY: number): void {
+        const sc = ensureScene()
+        sc.gravity = g
+        sc.groundY = groundY
+    }
+
+    //% blockId=r3d_disable_gravity block="disable gravity"
+    //% group="Physics" weight=95
+    export function disableGravity(): void {
+        const sc = ensureScene()
+        sc.gravity = 0
+        sc.camVelY = 0
+    }
+
+    //% blockId=r3d_jump block="jump with force $force"
+    //% group="Physics" weight=90
+    //% force.defl=0.2
+    export function jump(force: number): void {
+        const sc = ensureScene()
+        if (sc.camOnGround) {
+            sc.camVelY = force
+            sc.camOnGround = false
+        }
+    }
+
+    //% blockId=r3d_is_on_ground block="camera is on ground"
+    //% group="Physics" weight=80
+    export function isOnGround(): boolean {
+        return ensureScene().camOnGround
+    }
+
+    function _applyGravity(sc: Scene3D): void {
+        const cam = sc.camera
+        sc.camVelY -= sc.gravity
+        cam.position.y += sc.camVelY
+        if (cam.position.y <= sc.groundY) {
+            cam.position.y = sc.groundY
+            sc.camVelY = 0
+            sc.camOnGround = true
+        } else {
+            sc.camOnGround = false
+        }
+    }
+
+    // ===================== ANIMATION =====================
+
+    //% blockId=r3d_animate_lerp block="animate $mesh to x $tx y $ty z $tz||speed $speed"
+    //% group="Transform" weight=50
+    //% mesh.shadow=variables_get
+    //% speed.defl=0.1
+    export function animateLerp(mesh: Mesh3D, tx: number, ty: number, tz: number, speed: number): void {
+        if (!mesh) return
+        mesh.position.x += (tx - mesh.position.x) * speed
+        mesh.position.y += (ty - mesh.position.y) * speed
+        mesh.position.z += (tz - mesh.position.z) * speed
+    }
+
+    //% blockId=r3d_animate_spin block="spin $mesh around Y by $speed"
+    //% group="Transform" weight=49
+    //% mesh.shadow=variables_get
+    //% speed.defl=0.02
+    export function animateSpin(mesh: Mesh3D, speed: number): void {
+        if (!mesh) return
+        mesh.rotation.y += speed
+    }
+
+    //% blockId=r3d_animate_bob block="bob $mesh amplitude $amp speed $speed"
+    //% group="Transform" weight=48
+    //% mesh.shadow=variables_get
+    //% amp.defl=0.5 speed.defl=0.05
+    export function animateBob(mesh: Mesh3D, amp: number, speed: number): void {
+        if (!mesh) return
+        mesh.position.y += Math.sin(game.runtime() * speed / 1000) * amp * 0.1
     }
 }

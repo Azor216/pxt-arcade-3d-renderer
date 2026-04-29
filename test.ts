@@ -1,86 +1,104 @@
 // ============================================================
-// TEST / DEMO - 3D Mapa (dungeon / level)
+// TEST / DEMO - 3D Město s texturami
+// Ukázkové městečko s budovami, střechami a podlahou
 // Šipky = pohyb a otáčení, A/B = nahoru/dolů
 // ============================================================
 
 Render3D.createScene()
-Render3D.setSkyColor(15)
-Render3D.setGroundColor(15)
-Render3D.setLightDirection(0.3, 1, 0.2)
+Render3D.setSkyColor(9)
+Render3D.setGroundColor(12)
+Render3D.setLightDirection(0.5, 0.8, -0.3)
 
-// Textury
+// Vytvoř textury
 let texBrick = Render3D.textureBrick()
+let texWindow = Render3D.textureWindow()
 let texStone = Render3D.textureStone()
 let texWood = Render3D.textureWood()
 let texGrass = Render3D.textureGrass()
+let texRoad = Render3D.textureRoad()
 
-// --- Definuj typy buněk ---
-// 0 = prázdná podlaha (default)
-Map3D.defineCellType(0, 0, 7, 12)       // podlaha: šedá
-Map3D.setCellTopTexture(0, texStone)
+// Podlaha s trávou
+let ground = Render3D.addGround(0, 40, 7)
+Render3D.setMeshTexture(ground, texGrass)
 
-Map3D.defineCellType(1, 3, 12, 12)      // zeď: vysoká, šedá
-Map3D.setCellWallTexture(1, texStone)
+// ----- Ulice: střední řada budov -----
 
-Map3D.defineCellType(2, 2, 2, 14)       // cihlová zeď
-Map3D.setCellWallTexture(2, texBrick)
+// Modrá budova vlevo – cihlová textura
+let b1 = Render3D.addBox(0, 1.5, 5, 2, 3, 2, 8)
+Render3D.setMeshTexture(b1, texBrick)
+// Střecha
+Render3D.addPyramid(0, 3, 5, 2.5, 1, 12)
 
-Map3D.defineCellType(3, 1, 14, 7)       // nízký dřevěný blok
-Map3D.setCellWallTexture(3, texWood)
-Map3D.setCellTopTexture(3, texWood)
+// Červená budova vpravo – okna
+let b2 = Render3D.addBox(5, 1, 5, 2, 2, 2, 2)
+Render3D.setMeshTexture(b2, texWindow)
+// Střecha (šikmá)
+Render3D.addWedge(5, 2, 5, 2, 0.8, 2, 14)
 
-Map3D.defineCellType(4, 0, 7, 7)        // travnatá podlaha
-Map3D.setCellTopTexture(4, texGrass)
+// Zelená budova - výšková, kamenná
+let b3 = Render3D.addBox(-4, 2, 8, 2, 4, 2, 7)
+Render3D.setMeshTexture(b3, texStone)
+Render3D.addPyramid(-4, 4, 8, 2.5, 1.2, 6)
 
-Map3D.defineCellType(5, 4, 8, 12)       // vysoká modrá věž
-Map3D.setCellWallTexture(5, texStone)
+// ----- Zadní řada budov -----
 
-// --- Vytvoř mapu ---
-Map3D.createMap(16, 16, 2)
+// Žlutý dům – dřevěný
+let b4 = Render3D.addBox(3, 0.75, 12, 1.5, 1.5, 1.5, 5)
+Render3D.setMeshTexture(b4, texWood)
 
-// Okrajové zdi
-Map3D.fillBorder(1)
+// Fialová věž – cihlová
+let b5 = Render3D.addBox(-2, 2.5, 14, 1.5, 5, 1.5, 11)
+Render3D.setMeshTexture(b5, texBrick)
+Render3D.addPyramid(-2, 5, 14, 2, 1.5, 10)
 
-// Místnosti
-Map3D.fillRect(2, 2, 6, 6, 4)           // místnost 1: tráva
-Map3D.fillRect(8, 2, 13, 6, 0)          // místnost 2: kámen
-Map3D.fillRect(2, 8, 6, 13, 0)          // místnost 3
-Map3D.fillRect(8, 8, 13, 13, 4)         // místnost 4: tráva
+// Oranžový dům – okna
+let b6 = Render3D.addBox(7, 1, 10, 3, 2, 2, 4)
+Render3D.setMeshTexture(b6, texWindow)
+Render3D.addWedge(7, 2, 10, 3, 1, 2, 14)
 
-// Příčky mezi místnostmi
-Map3D.drawLine(7, 2, 7, 6, 2)           // cihlová příčka
-Map3D.drawLine(2, 7, 13, 7, 1)          // kamenná příčka
-Map3D.drawLine(7, 8, 7, 13, 2)          // cihlová příčka
+// Malý červený domek – cihlový
+let b7 = Render3D.addBox(-6, 0.5, 5, 1, 1, 1, 2)
+Render3D.setMeshTexture(b7, texBrick)
+Render3D.addPyramid(-6, 1, 5, 1.3, 0.5, 14)
 
-// Dveře (mezery v příčkách)
-Map3D.setCell(7, 4, 0)
-Map3D.setCell(5, 7, 0)
-Map3D.setCell(10, 7, 0)
-Map3D.setCell(7, 10, 0)
+// ----- Přední řada budov -----
+let b8 = Render3D.addBox(4, 1.25, 0, 2.5, 2.5, 2, 9)
+Render3D.setMeshTexture(b8, texStone)
+let b9 = Render3D.addBox(-5, 0.75, -2, 1.5, 1.5, 1.5, 3)
+Render3D.setMeshTexture(b9, texWindow)
 
-// Sloupy / dekorace
-Map3D.setCell(4, 4, 3)
-Map3D.setCell(10, 4, 3)
-Map3D.setCell(4, 11, 5)
+// ----- Kamera -----
+Render3D.setCameraPosition(0, 2.5, -8)
+Render3D.setCameraRotation(0, 0.2)
+Render3D.setFieldOfView(60)
 
-// Rozházené bloky
-Map3D.scatter(3, 5, 8, 8, 13, 13)
-
-// --- Postav mapu ---
-Map3D.build()
-
-// Kamera
-Map3D.placeCameraAt(3, 3, 1.5)
-Render3D.setCameraRotation(0.8, 0.1)
-Render3D.setFieldOfView(70)
-
-// Ovládání
+// ----- Ovládání -----
 game.onUpdate(function () {
-    if (controller.up.isPressed()) Render3D.moveCameraForward(0.1)
-    if (controller.down.isPressed()) Render3D.moveCameraForward(-0.1)
-    if (controller.left.isPressed()) Render3D.rotateCamera(-0.04, 0)
-    if (controller.right.isPressed()) Render3D.rotateCamera(0.04, 0)
-    if (controller.A.isPressed()) Render3D.moveCameraUp(0.06)
-    if (controller.B.isPressed()) Render3D.moveCameraUp(-0.06)
+    // Pohyb dopředu/dozadu
+    if (controller.up.isPressed()) {
+        Render3D.moveCameraForward(0.12)
+    }
+    if (controller.down.isPressed()) {
+        Render3D.moveCameraForward(-0.12)
+    }
+    // Otáčení
+    if (controller.left.isPressed()) {
+        Render3D.rotateCamera(-0.04, 0)
+    }
+    if (controller.right.isPressed()) {
+        Render3D.rotateCamera(0.04, 0)
+    }
+    // Nahoru/dolů (A/B tlačítka)
+    if (controller.A.isPressed()) {
+        Render3D.moveCameraUp(0.08)
+    }
+    if (controller.B.isPressed()) {
+        Render3D.moveCameraUp(-0.08)
+    }
+
+    // Animace: pomalu rotuj modrou budovu
+    Render3D.rotateMeshBy(b1, 0, 0.01, 0)
+
+    // Renderuj scénu
     Render3D.render()
 })
