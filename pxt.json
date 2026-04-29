@@ -1,7 +1,7 @@
 {
     "name": "arcade-3d-engine",
-    "version": "1.6.0",
-    "description": "Real 3D rendering engine with map editor for MakeCode Arcade",
+    "version": "2.0.0",
+    "description": "Real 3D engine with level/map editor for MakeCode Arcade",
     "dependencies": {
         "device": "*"
     },
