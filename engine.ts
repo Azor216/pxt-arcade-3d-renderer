@@ -280,9 +280,10 @@ namespace Render3D {
                     const sy2 = -cv2.y * focalLen / cv2.z + HH
 
                     // Skip degenerate triangles
+                    // No backface culling - painter's algorithm handles visibility
+                    // Only skip degenerate (zero-area) triangles
                     const area = (sx1 - sx0) * (sy2 - sy0) - (sx2 - sx0) * (sy1 - sy0)
-                    // Front faces have negative area after Y-flip projection
-                    if (area >= 0) continue
+                    if (area === 0) continue
 
                     // Off-screen rejection
                     const minSx = Math.min(sx0, Math.min(sx1, sx2))
