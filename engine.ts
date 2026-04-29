@@ -281,8 +281,8 @@ namespace Render3D {
 
                     // Skip degenerate triangles
                     const area = (sx1 - sx0) * (sy2 - sy0) - (sx2 - sx0) * (sy1 - sy0)
-                    // Y is flipped in projection, so front faces have positive area
-                    if (area <= 0) continue
+                    // Front faces have negative area after Y-flip projection
+                    if (area >= 0) continue
 
                     // Off-screen rejection
                     const minSx = Math.min(sx0, Math.min(sx1, sx2))
