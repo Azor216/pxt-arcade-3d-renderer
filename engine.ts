@@ -281,7 +281,8 @@ namespace Render3D {
 
                     // Skip degenerate triangles
                     const area = (sx1 - sx0) * (sy2 - sy0) - (sx2 - sx0) * (sy1 - sy0)
-                    if (area === 0) continue
+                    // Y is flipped in projection, so front faces have positive area
+                    if (area <= 0) continue
 
                     // Off-screen rejection
                     const minSx = Math.min(sx0, Math.min(sx1, sx2))
@@ -325,12 +326,7 @@ namespace Render3D {
             const f = renderList[i]
             const tex = f.texId >= 0 ? Rasterizer.getTexture(f.texId) : null
             if (tex) {
-                Rasterizer.fillTriangleTex(
-                    img, tex, f.shade,
-                    f.sx0, f.sy0, f.uz0, f.vz0, f.iz0,
-                    f.sx1, f.sy1, f.uz1, f.vz1, f.iz1,
-                    f.sx2, f.sy2, f.uz2, f.vz2, f.iz2
-                )
+                Rasterizer.fillTriangleTex(img, tex, f)
             } else {
                 Rasterizer.fillTriangle(
                     img,

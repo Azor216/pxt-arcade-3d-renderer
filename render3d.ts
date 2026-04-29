@@ -170,17 +170,15 @@ namespace Rasterizer {
         }
     }
 
-    // Textured triangle rasterizer with perspective-correct UV
-    // (no nested functions - MakeCode STS compatible)
-    export function fillTriangleTex(
-        img: Image, tex: Image, shade: number,
-        x0: number, y0: number, uz0: number, vz0: number, iz0: number,
-        x1: number, y1: number, uz1: number, vz1: number, iz1: number,
-        x2: number, y2: number, uz2: number, vz2: number, iz2: number
-    ): void {
-        x0 = Math.round(x0); y0 = Math.round(y0)
-        x1 = Math.round(x1); y1 = Math.round(y1)
-        x2 = Math.round(x2); y2 = Math.round(y2)
+    // Textured triangle rasterizer - takes RenderFace to avoid parameter limits
+    export function fillTriangleTex(img: Image, tex: Image, f: RenderFace): void {
+        let x0 = Math.round(f.sx0); let y0 = Math.round(f.sy0)
+        let x1 = Math.round(f.sx1); let y1 = Math.round(f.sy1)
+        let x2 = Math.round(f.sx2); let y2 = Math.round(f.sy2)
+        let uz0 = f.uz0; let vz0 = f.vz0; let iz0 = f.iz0
+        let uz1 = f.uz1; let vz1 = f.vz1; let iz1 = f.iz1
+        let uz2 = f.uz2; let vz2 = f.vz2; let iz2 = f.iz2
+        const shade = f.shade
 
         const tw = tex.width
         const th = tex.height
@@ -234,7 +232,7 @@ namespace Rasterizer {
             if (ixa <= ixb) {
                 const span = xb - xa
                 const ispan = span > 0 ? 1.0 / span : 0
-                for (let x = ixa; x <= ixb; x++) {
+                for (let x = ixa; x <= ixb; x += 2) {
                     const t = (x - xa) * ispan
                     const iz = iza + (izb - iza) * t
                     if (iz < 0.0001) continue
@@ -249,6 +247,7 @@ namespace Rasterizer {
                     if (c === 0) continue
                     c = shadePixel(c, shade)
                     img.setPixel(x, y, c)
+                    if (x + 1 <= ixb) img.setPixel(x + 1, y, c)
                 }
             }
         }
@@ -278,7 +277,7 @@ namespace Rasterizer {
             if (ixa <= ixb) {
                 const span = xb - xa
                 const ispan = span > 0 ? 1.0 / span : 0
-                for (let x = ixa; x <= ixb; x++) {
+                for (let x = ixa; x <= ixb; x += 2) {
                     const t = (x - xa) * ispan
                     const iz = iza + (izb - iza) * t
                     if (iz < 0.0001) continue
@@ -293,6 +292,7 @@ namespace Rasterizer {
                     if (c === 0) continue
                     c = shadePixel(c, shade)
                     img.setPixel(x, y, c)
+                    if (x + 1 <= ixb) img.setPixel(x + 1, y, c)
                 }
             }
         }
